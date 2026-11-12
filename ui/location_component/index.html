@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 14px sans-serif; color: #e5e7eb; margin: 0; }
+    #status { padding: 8px 0; }
+  </style>
+</head>
+<body>
+  <div id="status">Location tracking is off.</div>
+  <script>
+    (function () {
+      var watchId = null;
+      var lastSentAt = 0;
+      var lastPosition = null;
+      var status = document.getElementById("status");
+
+      function sendValue(value) {
+        window.parent.postMessage({
+          isStreamlitMessage: true,
+          type: "streamlit:setComponentValue",
+          value: value
+        }, window.location.origin);
+      }
+
+      function stopTracking() {
+        var geolocation = window.parent.navigator.geolocation || navigator.geolocation;
+        if (watchId !== null && geolocation) {
+          geolocation.clearWatch(watchId);
+        }
+        watchId = null;
+        lastSentAt = 0;
+        lastPosition = null;
+        status.textContent = "Location tracking is off.";
+      }
+
+      function startTracking() {
+        if (watchId !== null) return;
+        var geolocation = window.parent.navigator.geolocation || navigator.geolocation;
+        if (!geolocation) {
+          status.textContent = "This browser does not support location access.";
+          sendValue({ error: "Geolocation is not supported by this browser." });
+          return;
+        }
+        status.textContent = "Requesting location permission…";
+        watchId = geolocation.watchPosition(
+          function (position) {
+            var now = Date.now();
+            var current = position.coords;
+            var moved = !lastPosition ||
+              Math.abs(current.latitude - lastPosition.latitude) > 0.00008 ||
+              Math.abs(current.longitude - lastPosition.longitude) > 0.00008;
+            if (lastSentAt && (!moved || now - lastSentAt < 10000)) return;
+            lastSentAt = now;
+            lastPosition = {
+              latitude: current.latitude,
+              longitude: current.longitude
+            };
+            status.textContent = "Location is updating in this browser session.";
+            sendValue({
+              latitude: current.latitude,
+              longitude: current.longitude,
+              accuracy: current.accuracy,
+              timestamp: position.timestamp
+            });
+          },
+          function (error) {
+            status.textContent = "Location unavailable: " + error.message;
+            sendValue({ error: error.message });
+          },
+          { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+        );
+      }
+
+      window.addEventListener("message", function (event) {
+        if (event.source !== window.parent || event.origin !== window.location.origin) return;
+        if (!event.data || event.data.type !== "streamlit:render") return;
+        if (event.data.args && event.data.args.active) startTracking();
+        else stopTracking();
+      });
+
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:componentReady",
+        apiVersion: 1
+      }, window.location.origin);
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:setFrameHeight",
+        height: 40
+      }, window.location.origin);
+      window.addEventListener("pagehide", stopTracking);
+    })();
+  </script>
+</body>
+</html>

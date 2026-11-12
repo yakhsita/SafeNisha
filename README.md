@@ -9,6 +9,25 @@
 
 SafeNisha compares a shortest walking route against a route that trades off walking distance and **estimated risk**. It uses OpenStreetMap pedestrian graphs, historical incident/environmental data where suitable, and user-submitted infrastructure hazard reports. Users can adjust the distance–risk tradeoff, inspect route explanations, and optionally access contact-sharing/SOS features.
 
+### Run the local prototype
+
+```powershell
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
+```
+
+The current app is a **local prototype**, not a real-world navigation or safety tool. As soon as both endpoints are selected, it requests walking-route alternatives from the public OpenStreetMap foot-routing service and displays the shortest and safety-preferred returned alternatives without a separate compare button. The safety preference ranks only alternatives returned by that service; it does not guarantee a globally optimal risk-aware route. Start and destination can be entered as `latitude, longitude` or selected by clicking the map. The hazard-report button switches map-click selection to a hazard point and previews a preferred-route rerank while leaving the original shortest route visible; this temporary point is explicitly unverified until reviewed. Address search is not available. Map tiles are requested by the browser from OpenStreetMap, and route coordinates are sent to the public walking router when both endpoints are selected.
+
+The CSV templates in `data/` contain headers only; no incident, lighting, or isolation observations are included or fabricated. Use `historical_incidents.csv` with `latitude,longitude,incident_count` (non-negative integer counts), `lighting.csv` with `latitude,longitude,lighting_deficiency`, and `isolation.csv` with `latitude,longitude,isolation` (feature values from 0 to 1). Coordinates must preserve the geographic precision of the source; do not convert police-station or area totals into invented street-level locations. A risk layer with no nearby observations is treated as unknown and increases the uncertainty indicator. The app labels this as limited data.
+
+The hazard-report button opens a local report panel; users select the affected map point and enter the hazard type and optional description. The clicked coordinates are saved in local SQLite storage but are not snapped to a road segment. New submissions remain unverified and are excluded from route scoring until locally confirmed. Map reports and the route risk indicators are experimental and are not validated measures of danger. The app server is bound to localhost, but local review controls have no authentication; do not expose this prototype publicly or enter sensitive information.
+
+### Journey, profile, Guardian Mode, and SOS prototype
+
+The route page's **Start journey** action asks the browser for location permission and uses the current position as the walking-route origin. While the page remains open, location updates move the map marker; routes are refreshed after sufficient movement. The browser session does not provide background tracking, and location coordinates are sent to the public walking router when calculating or refreshing a route. Stop the journey or revoke browser location permission to stop tracking.
+
+The **Profile & Guardian** page keeps a name and up to three trusted-contact entries in the active Streamlit session only. It does not create a secure hosted Guardian link. Guardian and SOS actions show local preview messages; they do **not** transmit location, send SMS (beeping or otherwise), call anyone, or notify emergency officials. Do not enter real names or phone numbers in this prototype. Real deployment requires authentication, secure storage, verified contacts, a hosted sharing service, and an authorized country-specific emergency integration. Never treat the demo SOS as an emergency service.
+
 ### Prototype risk score
 
 The initial experimental score combines five normalized indicators. Each input is in `[0,1]`, where a higher value contributes more estimated risk:
@@ -40,9 +59,9 @@ Street A is well lit but has more historical incidents; Street B is poorly lit b
 
 Do not use raw incident totals as a stand-in for danger. For example, an area with 50 incidents across 100,000 pedestrian journeys has a recorded rate of `0.0005` per journey, while one with 10 incidents across 1,000 journeys has a rate of `0.01`—20 times higher. Where reliable exposure data is available, the historical indicator could be developed as `C(e) = f(frequency, exposure, severity, recency, location)`. For the MVP, use normalized counts only across comparable geographic areas and time periods, document the limitations, and do not infer street-level locations from police-station- or area-level totals.
 
-**Core routing cost:** `cost(e) = length_m(e) * (1 + beta * risk_indicator(e))`, with `beta >= 0` and `risk_indicator` in `[0,1]`. Dijkstra minimizes the sum of edge costs. `beta=0` gives shortest-distance routing. The factor weights define the risk score; the separate, user-controlled `beta` determines how strongly that whole score affects route selection.
+**Current prototype route ranking:** for each alternative returned by the public foot router, the app calculates `cost(route) = distance_m * (1 + beta * route_risk_indicator)`, with `beta >= 0` and the indicator in `[0,1]`. `beta=0` selects the shortest returned alternative. The factor weights define the risk score; the separate, user-controlled safety preference (`beta`) determines how strongly that whole score affects ranking. This is not a global risk-aware search of every street or edge; route results are limited to the public service's alternatives.
 
-**Presentation framing:** SafeNisha uses an incident-prioritized, multi-factor risk-scoring engine that evaluates historical incident patterns, lighting conditions, live community reports, and isolation indicators. These factors contribute to a distance-aware, multi-objective routing algorithm, enabling pedestrians to compare routes by estimated risk and travel distance.
+**Presentation framing:** SafeNisha uses an incident-prioritized, multi-factor risk-scoring prototype that can compare historical incident patterns, lighting conditions, locally confirmed community reports, and isolation indicators when data is available. These factors rank the returned walking-route alternatives by estimated risk and travel distance; missing data is surfaced and the scores are not validated safety measures.
 
 **Optional statistical model (only if data supports it):** `lambda = exposure * exp(b0 + b1*past_incidents + b2*lighting + b3*hazards + b4*isolation)`. Learn coefficients from historical observations and validate on later time periods before presenting results. Treat this as a separately evaluated model—not an automatically validated replacement for, or extra layer on top of, the prototype weighted score. Poisson predictions are not automatically individual safety probabilities. If incident records are only ward-level, do not present street-level predictions as observed facts. If the data is insufficient, show a clearly labeled synthetic demonstration and explain the limitation. All risk scores are estimates, **not guarantees of safety**.
 
@@ -234,8 +253,7 @@ SafeNisha/
 ├── data/
 │   ├── validate_incidents.py
 │   ├── incident_data_sources.md
-│   ├── koramangala_walk.graphml
-│   └── SafeNisha.db
+│   └── safenisha.sqlite3  # created locally when the app runs; gitignored
 ├── hazards/
 │   ├── __init__.py
 │   ├── database.py
