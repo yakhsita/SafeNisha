@@ -13,26 +13,14 @@ SafeNight compares a shortest walking route against a route that trades off walk
 
 **Statistical model (only if data supports it):** `lambda = exposure * exp(b0 + b1*past_incidents + b2*lighting + b3*hazards + b4*isolation)`. The coefficients are learned from historical observations and validated on later time periods. Poisson predictions are not automatically individual safety probabilities. If incident records are only ward-level, do not present street-level predictions as observed facts. If the data is insufficient, show a clearly labeled synthetic demonstration and explain the limitation.
 
-## 2. Final visual direction — Member 2
+## 2. Roles and exact assignments
 
-Use **Aurora AI-Native (#9)** as the primary theme from the shared frontend references. Borrow **Transit Line (#2)** for clear route lines and markers, and **Risk Atlas (#4)** for an optional risk overlay. **3D Spatial Map (#10)** is an optional stretch goal only.
-
-**Colors:** Midnight `#0A0F1F`, Indigo `#4F46E5`, Cyan `#22D3EE`, Magenta `#E879F9`, Mist `#E5E7EB`. Route line: readable green/teal; hazards: orange/coral; ensure good contrast and a clear legend. **Typography:** Sora for headings and Inter for body (or practical available alternatives).
-
-**Responsive requirement:** One application, **two design frames**:
-- **Laptop:** 1440 × 900 reference frame; wide map with side panel, route comparison cards and persistent controls.
-- **Mobile:** 390 × 844 reference frame; stacked search and route cards, map occupying most of the screen, easy-to-tap controls, visible SOS access, no horizontal overflow.
-
-Do not assume Streamlit automatically provides native turn-by-turn navigation, continuous background tracking, or an accurate 3D digital twin.
-
-## 3. Roles and exact assignments
-
-### Member 1 — Technical Lead (main implementation)
+### (Yakhsita) Member 1 — Technical Lead 
 
 **Owns:** `core/`, integration into `app.py`, routing and prediction evaluation.
 
 **Before hackathon:**
-1. Inspect existing Route Resilience Python code and `koramangala_roads.graphml`; identify reusable graph loading, shortest-path, edge updates and visualization functions.
+1. Inspect existing Python code and `koramangala_roads.graphml`; identify reusable graph loading, shortest-path, edge updates and visualization functions.
 2. Verify whether the existing graph is a **walking** graph. If not, obtain a pedestrian-accessible OSMnx graph and save `data/koramangala_walk.graphml`.
 3. Implement graph loading, coordinate-to-node snapping, shortest-distance routing, and tests.
 4. Define the interfaces described below so teammates can code independently.
@@ -47,7 +35,7 @@ Do not assume Streamlit automatically provides native turn-by-turn navigation, c
 
 **Expected files:** `core/graph_loader.py`, `core/routing.py`, `core/risk_engine.py`, `core/incident_model.py`, `app.py`, `tests/test_routing.py`.
 
-### Member 2 — UI/UX + beginner frontend programming
+### (Shreya) Member 2 — UI/UX + beginner frontend programming
 
 **Before hackathon:**
 1. Create a Figma file with **laptop and mobile versions** of the same SafeNight interface.
@@ -60,6 +48,16 @@ Do not assume Streamlit automatically provides native turn-by-turn navigation, c
 3. Produce a design system: colors, fonts, button states, spacing, icons, loading and error states.
 4. Create an interactive Figma prototype showing Home → Route Comparison → Report Hazard.
 5. Export only necessary assets and record a 30–60 second walkthrough of desktop and mobile designs.
+
+(Sanvi's design style implementation): Use **Aurora AI-Native (#9)** as the primary theme from the shared frontend references. Borrow **Transit Line (#2)** for clear route lines and markers, and **Risk Atlas (#4)** for an optional risk overlay.
+
+**Colors:** Midnight `#0A0F1F`, Indigo `#4F46E5`, Cyan `#22D3EE`, Magenta `#E879F9`, Mist `#E5E7EB`. Route line: readable green/teal; hazards: orange/coral; ensure good contrast and a clear legend. **Typography:** Sora for headings and Inter for body (or practical available alternatives).
+
+**Responsive requirement:** One application, **two design frames**:
+- **Laptop:** 1440 × 900 reference frame; wide map with side panel, route comparison cards and persistent controls.
+- **Mobile:** 390 × 844 reference frame; stacked search and route cards, map occupying most of the screen, easy-to-tap controls, visible SOS access, no horizontal overflow.
+
+Do not assume Streamlit automatically provides native turn-by-turn navigation, continuous background tracking, or an accurate 3D digital twin.
 
 **Programming assignment:** Build `ui/frontend_demo.py` using Streamlit and placeholder data. Include `st.text_input` (source/destination), `st.slider` (beta), `st.columns` (route cards), `st.selectbox` (hazard type), and basic CSS in `ui/styles.py`. **No routing math or database changes.**
 
@@ -78,7 +76,7 @@ These are illustrative values, not verified SafeNight predictions. Show a “Dat
 
 **Acceptance checklist:** laptop and mobile readable; controls visible; two routes distinguishable without relying only on color; no fake “AI explanation” claims (route explanation is computed from actual route features); no broken buttons in final demo.
 
-### Member 3 — Research, judge Q&A, pitch + beginner data programming
+### (Shamitha) Member 3 — Research, judge Q&A, pitch + beginner data programming
 
 **Before hackathon:**
 1. Research the problem and audience; cite credible sources. Compare SafeNight with existing navigation/safety apps without claiming “first ever.”
@@ -151,7 +149,7 @@ These are illustrative values, not verified SafeNight predictions. Show a “Dat
 43. How would you evaluate real-world effectiveness ethically?
 44. What would you build next with more time?
 
-### Member 4 — Hazard reporting backend + simple UI
+### (Sanvi) Member 4 — Hazard reporting backend + simple UI
 
 **Owns:** `hazards/` only, plus hazard tests.
 
