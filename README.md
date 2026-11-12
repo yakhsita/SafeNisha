@@ -7,11 +7,44 @@
 
 ## 1. What we are building
 
-SafeNisha compares a shortest walking route against a route that trades off walking distance and **estimated incident-related risk**. It uses OpenStreetMap pedestrian graphs, historical incident/environmental data where suitable, a Poisson count model where training data permits, and user-submitted infrastructure hazard reports. Users can adjust the distance–risk tradeoff, inspect route explanations, and optionally access contact-sharing/SOS features.
+SafeNisha compares a shortest walking route against a route that trades off walking distance and **estimated risk**. It uses OpenStreetMap pedestrian graphs, historical incident/environmental data where suitable, and user-submitted infrastructure hazard reports. Users can adjust the distance–risk tradeoff, inspect route explanations, and optionally access contact-sharing/SOS features.
 
-**Core routing cost:** `cost(e) = length_m(e) * (1 + beta * risk_indicator(e))`, with `beta >= 0` and `risk_indicator` in `[0,1]`. Dijkstra minimizes the sum of edge costs. `beta=0` gives shortest-distance routing. Risk scores are estimates, **not guarantees of safety**.
+### Prototype risk score
 
-**Statistical model (only if data supports it):** `lambda = exposure * exp(b0 + b1*past_incidents + b2*lighting + b3*hazards + b4*isolation)`. The coefficients are learned from historical observations and validated on later time periods. Poisson predictions are not automatically individual safety probabilities. If incident records are only ward-level, do not present street-level predictions as observed facts. If the data is insufficient, show a clearly labeled synthetic demonstration and explain the limitation.
+The initial experimental score combines five normalized indicators. Each input is in `[0,1]`, where a higher value contributes more estimated risk:
+
+\[
+R(e)=0.35C+0.30L+0.20H+0.10I+0.05U
+\]
+
+| Factor | Weight | Meaning |
+|---|---:|---|
+| `C` — Historical incidents | 35% | Documented incident patterns |
+| `L` — Lighting deficiency | 30% | Poor visibility or inadequate lighting |
+| `H` — Live hazards | 20% | Recent validated reports of broken streetlights, obstructions, and other hazards |
+| `I` — Isolation | 10% | Limited evidence of nighttime pedestrian or commercial activity |
+| `U` — Data uncertainty | 5% | Missing or unreliable information |
+
+These are **proposed prototype weights**, not validated measures of actual danger. Keep the weights internally configurable so scenarios can be compared; do not describe them as scientifically established. `U` expresses uncertainty in the estimate, not evidence that a street is more dangerous; show data limitations clearly. Keep unverified community submissions distinct from validated hazards. For example:
+
+| Factor | Street A | Street B |
+|---|---:|---:|
+| Historical incidents (`C`) | 0.9 | 0.1 |
+| Lighting deficiency (`L`) | 0.1 | 0.9 |
+| Live hazards (`H`) | 0.2 | 0.2 |
+| Isolation (`I`) | 0.2 | 0.5 |
+| Data uncertainty (`U`) | 0.1 | 0.1 |
+| **Calculated estimated risk** | **0.41** | **0.40** |
+
+Street A is well lit but has more historical incidents; Street B is poorly lit but has fewer. Under these illustrative values, A receives a slightly higher estimated score. These values are examples only—not measured probabilities of harm or evidence that either street is safe or unsafe.
+
+Do not use raw incident totals as a stand-in for danger. For example, an area with 50 incidents across 100,000 pedestrian journeys has a recorded rate of `0.0005` per journey, while one with 10 incidents across 1,000 journeys has a rate of `0.01`—20 times higher. Where reliable exposure data is available, the historical indicator could be developed as `C(e) = f(frequency, exposure, severity, recency, location)`. For the MVP, use normalized counts only across comparable geographic areas and time periods, document the limitations, and do not infer street-level locations from police-station- or area-level totals.
+
+**Core routing cost:** `cost(e) = length_m(e) * (1 + beta * risk_indicator(e))`, with `beta >= 0` and `risk_indicator` in `[0,1]`. Dijkstra minimizes the sum of edge costs. `beta=0` gives shortest-distance routing. The factor weights define the risk score; the separate, user-controlled `beta` determines how strongly that whole score affects route selection.
+
+**Presentation framing:** SafeNisha uses an incident-prioritized, multi-factor risk-scoring engine that evaluates historical incident patterns, lighting conditions, live community reports, and isolation indicators. These factors contribute to a distance-aware, multi-objective routing algorithm, enabling pedestrians to compare routes by estimated risk and travel distance.
+
+**Optional statistical model (only if data supports it):** `lambda = exposure * exp(b0 + b1*past_incidents + b2*lighting + b3*hazards + b4*isolation)`. Learn coefficients from historical observations and validate on later time periods before presenting results. Treat this as a separately evaluated model—not an automatically validated replacement for, or extra layer on top of, the prototype weighted score. Poisson predictions are not automatically individual safety probabilities. If incident records are only ward-level, do not present street-level predictions as observed facts. If the data is insufficient, show a clearly labeled synthetic demonstration and explain the limitation. All risk scores are estimates, **not guarantees of safety**.
 
 ## 2. Roles and exact assignments
 
@@ -245,9 +278,9 @@ SafeNisha/
 
 ## 7. MVP vs stretch goals
 
-**Must work:** pedestrian graph; shortest route; risk-aware route using clearly described estimated indicators; map with two routes; hazard submission/storage; route recalculation after a report; responsive dashboard.
+**Must work:** pedestrian graph; shortest route; risk-aware route using clearly described estimated indicators and the configurable prototype weights above; keep `beta` as the separate route-level distance–risk control; map with two routes; hazard submission/storage; route recalculation after a report; responsive dashboard.
 
-**Conditional on data:** fitted and validated Poisson model; historical incident overlay; calibrated route explanations. If unsuitable data, explicitly demonstrate a synthetic model rather than claim predictive accuracy.
+**Conditional on data:** fitted and validated Poisson model; historical incident overlay; calibrated route explanations. Evaluate any statistical model separately from the prototype weighted score, and do not combine them without a documented, validated method. If unsuitable data, explicitly demonstrate a synthetic model rather than claim predictive accuracy.
 
 **Stretch:** time-of-night risk slider, 3D map, full navigation, persistent Guardian Mode, automated contact alerts, civic dashboard.
 
@@ -267,6 +300,7 @@ SafeNisha/
 - [ ] Walking graph is verified, not assumed from a driving graph.
 - [ ] Shortest route is computed and shown.
 - [ ] Risk-aware route changes appropriately when beta changes.
+- [ ] Risk-factor weights are configurable; beta remains separate from the factor weights.
 - [ ] Hazard can be submitted, retrieved, resolved and displayed.
 - [ ] New valid hazard updates relevant route costs and triggers rerouting.
 - [ ] Poisson claims match the data and evaluation actually completed.
