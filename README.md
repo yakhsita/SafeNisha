@@ -49,7 +49,7 @@ SafeNight compares a shortest walking route against a route that trades off walk
 4. Create an interactive Figma prototype showing Home → Route Comparison → Report Hazard.
 5. Export only necessary assets and record a 30–60 second walkthrough of desktop and mobile designs.
 
-(Sanvi's design style implementation): Use **Aurora AI-Native (#9)** as the primary theme from the shared frontend references. Borrow **Transit Line (#2)** for clear route lines and markers, and **Risk Atlas (#4)** for an optional risk overlay.
+***(Sanvi's design style implementation)***: Use **Aurora AI-Native (#9)** as the primary theme from the shared frontend references. Borrow **Transit Line (#2)** for clear route lines and markers, and **Risk Atlas (#4)** for an optional risk overlay.
 
 **Colors:** Midnight `#0A0F1F`, Indigo `#4F46E5`, Cyan `#22D3EE`, Magenta `#E879F9`, Mist `#E5E7EB`. Route line: readable green/teal; hazards: orange/coral; ensure good contrast and a clear legend. **Typography:** Sora for headings and Inter for body (or practical available alternatives).
 
