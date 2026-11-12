@@ -1,4 +1,4 @@
-# SafeNight — COLOSSUS 3.0 Team Development Guide
+# SafeNight —  Adaptive Urban Safety & Risk-Aware Path Mapping 
 
 **Project:** Risk-aware pedestrian navigation with historical incident modeling, walking-network routing, community hazard reporting, and optional Guardian Mode.  
 **Team:** Four members (Member 1 = technical lead).  
