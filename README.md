@@ -1,7 +1,7 @@
 # SafeNight —  Adaptive Urban Safety & Risk-Aware Path Mapping 
 
 **Project:** Risk-aware pedestrian navigation with historical incident modeling, walking-network routing, community hazard reporting, and optional Guardian Mode.  
-**Team:** Four members (Member 1 = technical lead).  
+**Team:** Four members 
 **Design decision:** **Aurora AI-Native (#9)**, adapted into **responsive laptop and mobile layouts**.  
 **Goal:** A reliable, demonstrable MVP, not a promise of guaranteed personal safety.
 
