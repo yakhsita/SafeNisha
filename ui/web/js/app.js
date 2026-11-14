@@ -555,7 +555,7 @@
     $('#auth-up-extra').hidden = !up;
     $('#auth-title').textContent = up ? 'Create your account' : 'Welcome back';
     $('#auth-lead').textContent = up
-      ? 'Save trusted contacts and a default route preference on this device.'
+      ? 'Save your profile, trusted contacts and default route preference to your account.'
       : 'Sign in to keep your trusted contacts and route preference ready for every walk.';
     $('#auth-submit-txt').textContent = up ? 'Create account' : 'Sign in';
     $('#auth-pass').setAttribute('autocomplete', up ? 'new-password' : 'current-password');
@@ -582,10 +582,17 @@
   });
   function signedIn(p, msg) { profile = p; applyProfile(true); renderProfile(); toast(msg); }
   $('#p-signout').addEventListener('click', async () => {
-    await auth.signOut();
+    clearTimeout(betaSave);
+    if (profile) {
+      const saved = await auth.update({beta:+$('#p-beta').value});
+      if (!saved.ok) toast(saved.message, 'bad');
+    }
+    const r = await auth.signOut();
+    if (!r.ok) return toast(r.message, 'bad');
     profile = null;
     renderProfile();
-    toast('Signed out. Your saved profile was removed from this device.');
+    gContact.value = '';
+    toast('Signed out. Your profile is saved for your next sign-in.');
   });
 
   function renderProfile() {
@@ -599,7 +606,7 @@
     $('#p-avatar').textContent = ini.textContent;
     $('#p-name').textContent = p.name;
     $('#p-email').textContent = p.email;
-    $('#p-kind').textContent = 'Demo account · this device only';
+    $('#p-kind').textContent = 'Account · saved on this server';
     const b = p.beta ?? 2;
     $('#p-beta').value = b;
     $('#p-beta-out').textContent = 'β ' + (+b).toFixed(1);
@@ -722,22 +729,29 @@
     const em = $('#p-details .drow[data-k="emergency"] .d-val');
     if (em) { const v = detailValue(FIELDS[6]); em.textContent = v.text; em.classList.toggle('req', !!v.req); }
   }
-  $('#c-list').addEventListener('click', (e) => {
+  $('#c-list').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-del]');
     if (!b) return;
-    const [gone] = profile.contacts.splice(+b.dataset.del, 1);
-    auth.save(profile);
+    const gone = profile.contacts[+b.dataset.del];
+    b.disabled = true;
+    const r = await auth.update({contacts:profile.contacts.filter((_, i) => i !== +b.dataset.del)});
+    if (!r.ok) { b.disabled = false; return toast(r.message, 'bad'); }
+    profile = r.profile;
     renderContacts();
     toast(`${gone.name} removed from trusted contacts.`);
   });
-  $('#c-form').addEventListener('submit', (e) => {
+  $('#c-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const n = $('#c-name').value.trim(), ph = $('#c-phone').value.trim(), err = $('#c-error');
     if (!n) { showError(err, 'Add a name for the contact.'); $('#c-name').focus(); return; }
     if (ph && !/^\+?[\d\s()-]{6,}$/.test(ph)) { showError(err, 'Enter a valid phone number, or leave it empty.'); $('#c-phone').focus(); return; }
     err.hidden = true;
-    profile.contacts = (profile.contacts || []).concat({ name: n, phone: ph });
-    auth.save(profile);
+    const button = $('#c-form [type="submit"]');
+    button.disabled = true;
+    const r = await auth.update({contacts:(profile.contacts || []).concat({ name: n, phone: ph })});
+    button.disabled = false;
+    if (!r.ok) return showError(err, r.message);
+    profile = r.profile;
     $('#c-name').value = ''; $('#c-phone').value = '';
     renderContacts();
     applyProfile(false);
@@ -749,7 +763,10 @@
     $('#p-beta-out').textContent = 'β ' + v.toFixed(1);
     profile.beta = v;
     clearTimeout(betaSave);
-    betaSave = setTimeout(() => auth.save(profile), 250);
+    betaSave = setTimeout(async () => {
+      const r = await auth.update({beta:v});
+      if (!r.ok) toast(r.message, 'bad');
+    }, 250);
     applyBeta(v);
   });
   const pThemeCtl = segCtl($('#p-theme'), document.documentElement.dataset.theme, (v) => setTheme(v, true));
@@ -861,6 +878,7 @@
   gRender();
   renderProfile();
   applyProfile(true);
+  auth.restore().then(p => { profile = p; renderProfile(); applyProfile(true); });
   planPanel.sync();
   showTab(location.hash.slice(1) || 'plan');
   data.refreshHazards().then(()=>{renderReports(false);redrawHazards();})

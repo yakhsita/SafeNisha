@@ -1,4 +1,4 @@
-/* Standalone frontend adapter: route and hazard requests use the local Python API. Profiles remain local browser previews. */
+/* Standalone frontend adapter: route and hazard requests use the local Python API. Profiles use authenticated server sessions. */
 (function () {
   'use strict';
   const SN = (window.SN = window.SN || {});
@@ -16,7 +16,6 @@
   const BASE_HAZARDS = [];
   const ATLAS_BOUNDS = null;
   const clone = (o) => JSON.parse(JSON.stringify(o));
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   let hazards = [];
   async function request(url, payload) {
     const response = await fetch(url, payload === undefined ? {} : {
@@ -50,25 +49,16 @@
     return result;
   }
 
-  /* ---------- Accounts: SWAP POINT (auth service) ----------
-   * Placeholder: the profile lives in this browser's localStorage. Passwords are checked for
-   * shape only and never stored. A real backend replaces these bodies, keeping the shapes:
-   *   profile = { name, email, phone, gender, dob, memberSince, contacts: [{ name, phone }], beta }
-   */
-  const PKEY = 'sn.profile';
+  /* Accounts are persisted by the API; session cookies are HttpOnly. */
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  function readProfile() {
-    try { const p = JSON.parse(localStorage.getItem(PKEY)); return p && typeof p === 'object' ? p : null; } catch (_) { return null; }
-  }
-  function writeProfile(p) {
-    try { if (p) localStorage.setItem(PKEY, JSON.stringify(p)); else localStorage.removeItem(PKEY); } catch (_) { /* storage unavailable */ }
-    return p;
-  }
-  const nameFromEmail = (e) => e.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   const GENDERS = ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
   const PHONE_RE = /^\+?[\d\s()-]{7,}$/;
-  const thisMonth = () => new Date().toISOString().slice(0, 7); // "YYYY-MM"
-  const blank = (extra) => Object.assign({ name: '', email: '', phone: '', gender: '', dob: '', contacts: [], beta: 2, memberSince: thisMonth() }, extra);
+  let currentProfile = null, authRevision = 0, profileWrites = Promise.resolve();
+  try { localStorage.removeItem('sn.profile'); } catch (_) { /* old preview only */ }
+  async function accountRequest(url, payload) {
+    try { return await request(url, payload); }
+    catch (error) { return {ok:false, message:error.message}; }
+  }
 
   /** Field rules shared by sign-up and profile edits. Returns an error message or ''. */
   function checkField(k, v) {
@@ -89,49 +79,42 @@
   }
 
   const auth = {
-    GENDERS,
-    checkField,
-    current() {
-      const p = readProfile();
-      if (p && p.guest) { writeProfile(null); return null; } // guest sessions are no longer supported
-      if (p && !p.memberSince) { p.memberSince = thisMonth(); writeProfile(p); }
-      return p;
+    GENDERS, checkField,
+    current() { return currentProfile; },
+    async restore() {
+      const revision = authRevision;
+      const r = await accountRequest('/api/auth/me');
+      if (revision === authRevision && r.ok) currentProfile = r.profile;
+      return currentProfile;
     },
     async signIn(email, password) {
-      await wait(500);
-      email = (email || '').trim().toLowerCase();
-      if (!EMAIL_RE.test(email)) return { ok: false, message: 'Enter a valid email address.' };
-      if (!password) return { ok: false, message: 'Enter your password.' };
-      const prev = readProfile();
-      const p = prev && prev.email === email ? prev : blank({ name: nameFromEmail(email), email });
-      return { ok: true, profile: writeProfile(p) };
+      ++authRevision;
+      const r = await accountRequest('/api/auth/login', {email, password});
+      if (r.ok) currentProfile = r.profile;
+      return r;
     },
-    /** extra = { phone, gender, dob } */
     async signUp(name, email, password, extra = {}) {
-      await wait(600);
-      name = (name || '').trim(); email = (email || '').trim().toLowerCase();
-      const phone = (extra.phone || '').trim(), gender = extra.gender || '', dob = extra.dob || '';
-      const err = checkField('name', name) || checkField('email', email) ||
-        ((password || '').length < 8 ? 'Use a password with at least 8 characters.' : '') ||
-        checkField('phone', phone) || checkField('gender', gender) || checkField('dob', dob);
-      if (err) return { ok: false, message: err };
-      return { ok: true, profile: writeProfile(blank({ name, email, phone, gender, dob })) };
+      ++authRevision;
+      const r = await accountRequest('/api/auth/register', {name, email, password, ...extra});
+      if (r.ok) currentProfile = r.profile;
+      return r;
     },
-    /** Update one or more personal fields. Resolves to { ok, message?, profile? }. */
-    async update(fields) {
-      await wait(250);
-      const p = readProfile();
-      if (!p) return { ok: false, message: 'You are signed out.' };
-      for (const k of Object.keys(fields)) {
-        const v = (fields[k] || '').trim();
-        const err = checkField(k, v);
-        if (err) return { ok: false, message: err };
-        p[k] = k === 'email' ? v.toLowerCase() : v;
-      }
-      return { ok: true, profile: writeProfile(p) };
+    update(fields) {
+      const revision = authRevision;
+      profileWrites = profileWrites.then(async () => {
+        if (revision !== authRevision) return {ok:false,message:'Your session changed. Please try again.'};
+        const r = await accountRequest('/api/profile', fields);
+        if (r.ok && revision === authRevision) currentProfile = r.profile;
+        return r;
+      });
+      return profileWrites;
     },
-    async save(p) { return writeProfile(p); },
-    async signOut() { writeProfile(null); return { ok: true }; },
+    async signOut() {
+      await profileWrites;
+      const r = await accountRequest('/api/auth/logout', {});
+      if (r.ok) { ++authRevision; currentProfile = null; }
+      return r;
+    },
   };
 
   SN.data = {

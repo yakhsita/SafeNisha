@@ -8,7 +8,7 @@ SafeNisha helps people compare the shortest available walking route with an alte
 
 **Project status:** Working local prototype. Routing uses real walking paths; the risk demonstration uses explicitly labelled synthetic data.
 
-**3D route planning** · **GPS-based rerouting** · **Community hazard reports** · **53 automated tests passing**
+**3D route planning** · **GPS-based rerouting** · **Saved user accounts** · **61 automated tests passing**
 
 [Product tour](#product-tour) · [How it works](#how-the-risk-calculation-works) · [Run the app](#run-the-application) · [Judge walkthrough](#suggested-judge-walkthrough)
 
@@ -82,6 +82,7 @@ SafeNisha makes that trade-off visible and adjustable. It supports a more inform
 | **Hazard reporting** | Click the warning icon, pick the hazard location, then complete the report page. The selected pin and earlier reports remain visible. |
 | **Submit-and-reroute** | Submission saves the report, returns to the planner, and requests an avoidance route for the reporting user. Draft selections do not change routes. |
 | **Persistent local reports** | SQLite stores reports and their review status. Local controls can confirm or resolve them. |
+| **Accounts and saved profiles** | Register and sign in with email and password. SQLite persists profile details, trusted contacts and the default safety preference. Salted password hashes and revocable HttpOnly cookie sessions replace the browser-only preview. |
 | **Responsive interface** | Desktop and mobile layouts, light/dark themes, and keyboard-accessible address suggestions. |
 
 ### Reporting and rerouting
@@ -159,7 +160,7 @@ The preferred option added **23 metres** while reducing the model's route-exposu
 
 **Validation completed:**
 
-- **53 automated tests passing**, covering model validation, data leakage, scoring, risk alternatives, hazard handling, GPS-origin requirements, and address search.
+- **61 automated tests passing**, covering accounts, session expiry, profile isolation, password verification, model validation, data leakage, scoring, risk alternatives, hazard handling, GPS-origin requirements, and address search.
 - Chrome checks for the complete planning/reporting/rerouting flow on desktop and mobile.
 - A regression check on the route above confirms that preference zero selects the shortest path and preference five selects a distinct lower-risk alternative.
 - Python and browser risk calculations agree to `1e-10` at the tested anchor centres.
@@ -181,6 +182,7 @@ Python application server (web_app.py)
     +-- Gaussian risk field -------- Route scoring and Risk Atlas
     +-- Alternative search --------- Hotspot and hazard avoidance
     +-- Hazard service ------------- Local SQLite database
+    +-- Account service ------------ Password verification, sessions and saved profiles
 ```
 
 | Technology | Purpose |
@@ -210,6 +212,7 @@ core/
   route_scoring.py            Route factors and distance-risk ranking
   risk_engine.py              Indicator weights and validation
   geocoding.py                Nearby address lookup and caching
+  accounts.py                 Accounts, password hashes, sessions and saved profiles
 hazards/                      Report validation, persistence and review
 ui/web/                       Integrated standalone frontend
   js/map3d.js                 Display adapter for the Plan page; no routing calculations
@@ -264,6 +267,7 @@ Then, in a second terminal:
 ```powershell
 python tests/web_integration_check.py
 python tests/exact_route_browser_check.py
+python tests/profile_browser_check.py
 ```
 
 ## Suggested judge walkthrough
@@ -286,9 +290,10 @@ Public routing and geocoding services can be unavailable. A failed request shoul
 | Bounded walking-alternative search | Broader network-level risk-aware optimization and stronger service reliability |
 | Local report persistence and review | Authenticated moderation, abuse prevention and expiry workflows |
 | Foreground browser GPS | Tested production journey handling and explicit background-tracking design |
-| Local profile and Guardian previews | Secure accounts, verified contacts and a consent-based sharing service |
+| SQLite-backed accounts, profiles and trusted contacts | Email verification and password recovery |
+| Guardian design preview | Verified contacts and a consent-based sharing service |
 
-**Profile sign-in is a browser-local preview, not secure authentication. Guardian Mode does not share location or notify contacts. SOS opens the phone dialer where supported; it does not automatically call or send an alert.**
+**Profile sign-in now uses backend authentication. Passwords are stored as salted PBKDF2-SHA256 hashes; revocable sessions expire after seven days, and unsuccessful login attempts are rate limited. Email addresses and trusted contacts are not verified. Guardian Mode does not share location or notify contacts. SOS opens the phone dialer where supported; it does not automatically call or send an alert.**
 
 The server is intended for localhost use. Review controls are not authenticated. Route coordinates are sent to the configured walking service, address queries to the geocoder, and basemap requests to the tile provider. There is no production emergency-response integration.
 

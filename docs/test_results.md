@@ -83,3 +83,16 @@ Record test commands, outcomes, environment, and known limitations here.
   viewport, with no horizontal page overflow.
 - Initial service checks failed under network restrictions. The live checks
   above passed after restarting the isolated local server with network access.
+
+## Account and profile backend - 2026-11-14
+
+- Added SQLite-backed accounts and profiles, salted PBKDF2 password verification,
+  hashed session tokens, seven-day session expiry, logout revocation and login
+  rate limiting. Browser authentication uses HttpOnly, SameSite=Strict cookies.
+- Eight account tests cover password rejection, duplicate addresses, profile
+  persistence across logout/server restart, account isolation, expiry, validation,
+  throttling and actual HTTP requests including cross-origin write rejection.
+- Main automated suite: 61 passing tests. Existing routing calculations are unchanged.
+- `tests/profile_browser_check.py` exercises account creation, login, profile
+  editing, contacts, saved safety preference and session restoration against
+  a temporary database, independently of the main report/account history.

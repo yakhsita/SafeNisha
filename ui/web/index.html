@@ -259,14 +259,14 @@
           <p class="form-error" id="auth-error" role="alert" hidden></p>
           <button class="btn primary block" id="auth-submit" type="submit"><span class="spinner" aria-hidden="true"></span><span id="auth-submit-txt">Sign in</span></button>
         </form>
-        <p class="fine center">Demo sign-in: there is no account server yet. Your name, email and settings stay in this browser only, and the password is never stored.</p>
+        <p class="fine center">Your profile, trusted contacts and route preference are saved to your account on this server. Passwords are stored as salted hashes.</p>
       </div>
     </div>
 
     <!-- signed in -->
     <div id="auth-in" hidden>
       <div class="view-head with-action">
-        <div><h1>Profile</h1><p>Saved on this device for quicker, safer walks.</p></div>
+        <div><h1>Profile</h1><p>Your saved details, trusted contacts and route preference.</p></div>
         <button class="btn help-btn" id="help-btn" type="button" aria-haspopup="dialog">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8M12 17h.01"/></svg>Help</button>
       </div>
@@ -326,7 +326,7 @@
     <button class="icon-btn sm" id="help-close" type="button" aria-label="Close help"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
   <dl class="faq">
     <dt>Where is my profile stored?</dt>
-    <dd>Only in this browser. There is no account server yet, nothing is uploaded, and signing out removes it from this device.</dd>
+    <dd>Your profile is stored in this application's database. Signing out ends this browser session; your saved details are available when you sign in again.</dd>
     <dt>Why are some details marked “Required”?</dt>
     <dd>Phone, email and date of birth complete your profile. Tap any row with an arrow to add or change it.</dd>
     <dt>What is an emergency contact?</dt>
@@ -336,7 +336,7 @@
   </dl>
 </dialog>
 
-<footer class="foot">SafeNisha - simulated zone risk - local Guardian and profile previews - map tiles &copy; Esri, HERE, Garmin, OpenStreetMap contributors - address search: Photon / OpenStreetMap</footer>
+<footer class="foot">SafeNisha - simulated zone risk - Guardian design preview - map tiles &copy; Esri, HERE, Garmin, OpenStreetMap contributors - address search: Photon / OpenStreetMap</footer>
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
