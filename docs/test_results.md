@@ -96,3 +96,18 @@ Record test commands, outcomes, environment, and known limitations here.
 - `tests/profile_browser_check.py` exercises account creation, login, profile
   editing, contacts, saved safety preference and session restoration against
   a temporary database, independently of the main report/account history.
+
+## Refreshed place activity and mapped lighting - 2026-11-14
+
+- Main automated suite: 76 passing tests. Fifteen environment tests verify weekly
+  and overnight schedules, unsupported hours, open/closed isolation changes,
+  actual changes in preferred-route ranking, partial lighting coverage, private
+  access exclusion, unknown-data fallback, API metadata, nonblocking fetching,
+  cache reuse/expiry, failure backoff, response validation and alternate transport.
+- `tests/environment_browser_check.py` verifies that initial routes remain visible,
+  background evidence updates risk/source labels, outages restore synthetic scores,
+  the heatmap stays atlas-only and mobile layout remains within the viewport.
+- Live probes to public Overpass servers timed out in this environment; one
+  additional documented endpoint failed certificate validation. TLS verification
+  was retained. No successful live-data coverage is claimed from these checks;
+  scoring behaviour and recovery were verified using controlled test fixtures.

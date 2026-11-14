@@ -6,9 +6,9 @@
 
 SafeNisha helps people compare the shortest available walking route with an alternative that balances distance and estimated risk. Instead of showing only a route line, it explains the trade-off through distance, walking time, local risk colours, and a Risk Atlas.
 
-**Project status:** Working local prototype. Routing uses real walking paths; the risk demonstration uses explicitly labelled synthetic data.
+**Project status:** Working local prototype. Routing uses real walking paths. Incident modelling uses synthetic data; available OSM place schedules and mapped lighting provide separately labelled contextual estimates.
 
-**3D route planning** · **GPS-based rerouting** · **Saved user accounts** · **61 automated tests passing**
+**3D route planning** · **Refreshed activity and lighting estimates** · **Saved user accounts** · **76 automated tests passing**
 
 [Product tour](#product-tour) · [How it works](#how-the-risk-calculation-works) · [Run the app](#run-the-application) · [Judge walkthrough](#suggested-judge-walkthrough)
 
@@ -32,7 +32,7 @@ Pick the hazard point on the planner, then report a broken streetlight, dark pat
 
 ### 3. Understand the route in its neighbourhood
 
-The **Risk Atlas** overlays the preferred and shortest routes on a smooth kernel-density heatmap. Its hotspots and the route scorer use the same synthetic risk field, connecting the visual explanation to the routing decision. Redder areas show higher model values; faint areas show lower values.
+The **Risk Atlas** overlays the preferred and shortest routes on a smooth kernel-density heatmap. Its hotspots show the same synthetic baseline used by the route scorer. Available place-schedule and lighting evidence can further adjust route scores and line colours. Redder hotspots show higher synthetic model values; faint areas show lower values.
 
 ![Risk Atlas showing the preferred and shortest walking routes over smooth synthetic risk hotspots, with start, destination, and hazard markers.](docs/images/risk-atlas.png)
 
@@ -76,6 +76,8 @@ SafeNisha makes that trade-off visible and adjustable. It supports a more inform
 | **Adjustable safety preference** | A slider changes the influence of estimated risk. Zero favours distance; higher settings give risk more influence. |
 | **Risk-aware alternative search** | Request additional paths around intersecting synthetic hotspots, even when the initial router returns only one path. |
 | **Risk-coloured roads** | Preferred-route segments show local model risk rather than using a single colour for the entire path. |
+| **Time-aware nearby activity** | Available OSM schedules for shops, restaurants, food courts, courts and other public places adjust isolation estimates near each path. Unknown hours remain unknown; this is an activity proxy, not a live crowd count. |
+| **Mapped lighting evidence** | Road `lit` tags and nearby mapped lamps adjust lighting deficiency only over covered route sections. They describe infrastructure, not current lamp operation. |
 | **Risk Atlas** | View synthetic kernel-density hotspots with the current shortest and preferred routes. The heatmap appears only in the atlas. |
 | **Current location** | Centre either map on GPS, or use the current location as the starting point. |
 | **Journey tracking** | Update location while the page is open. Explicit rerouting during a journey uses a fresh GPS origin. |
@@ -139,6 +141,16 @@ These are configurable prototype weights, not statistically established measures
 
 ### 4. Balance distance and risk
 
+Before ranking routes, available environmental evidence adjusts the lighting and isolation factors:
+
+- Public place schedules are evaluated in **Asia/Kolkata** for the supported southern-India demo region. Ordinary weekly schedules, multiple daily windows and overnight hours are supported. Missing hours, holiday-dependent rules and unsupported expressions remain unknown; time zones outside the supported region are not guessed.
+- Places within **150 m** contribute to a distance-weighted activity proxy. Scheduled-open places reduce estimated isolation; closed places do not contribute activity. Private-access features are excluded. This does not measure how many people are present.
+- Explicit road lighting tags within **25 m**, or mapped lamps within **30 m**, contribute lighting evidence. An explicit unlit road takes precedence over a nearby mapped lamp. No missing lamp record is treated as proof of darkness.
+- Context is blended with the synthetic baseline: **65%** weight for known-hours activity, **70%** for explicit road lighting, and **40%** for lamp-presence evidence over covered sections. These are prototype heuristics, not calibrated safety probabilities. Synthetic uncertainty remains at its maximum.
+- Map data loads in the background, is cached for **10 minutes**, and schedules/scores are re-evaluated **every minute** while a planned route is visible. Fetch failures retain the synthetic fallback and are labelled in the UI. Cards and route colours use the resulting mixed-source scores; the atlas heatmap remains the synthetic baseline.
+
+The incident regression and its training data remain unchanged by these contextual adjustments.
+
 ```text
 Route cost = distance in metres x (1 + safety preference x route risk)
 ```
@@ -160,7 +172,7 @@ The preferred option added **23 metres** while reducing the model's route-exposu
 
 **Validation completed:**
 
-- **61 automated tests passing**, covering accounts, session expiry, profile isolation, password verification, model validation, data leakage, scoring, risk alternatives, hazard handling, GPS-origin requirements, and address search.
+- **76 automated tests passing**, covering environmental scoring, opening hours, background caching, outages, accounts, session expiry, profile isolation, password verification, model validation, scoring, risk alternatives, hazard handling, GPS-origin requirements, and address search.
 - Chrome checks for the complete planning/reporting/rerouting flow on desktop and mobile.
 - A regression check on the route above confirms that preference zero selects the shortest path and preference five selects a distinct lower-risk alternative.
 - Python and browser risk calculations agree to `1e-10` at the tested anchor centres.
@@ -180,6 +192,7 @@ Python application server (web_app.py)
     +-- Address search ------------- Photon / OpenStreetMap-derived index
     +-- Incident models ------------ Synthetic JSON dataset
     +-- Gaussian risk field -------- Route scoring and Risk Atlas
+    +-- Environmental context ------ OSM schedules and mapped lighting via Overpass
     +-- Alternative search --------- Hotspot and hazard avoidance
     +-- Hazard service ------------- Local SQLite database
     +-- Account service ------------ Password verification, sessions and saved profiles
@@ -213,6 +226,7 @@ core/
   risk_engine.py              Indicator weights and validation
   geocoding.py                Nearby address lookup and caching
   accounts.py                 Accounts, password hashes, sessions and saved profiles
+  environment.py              Background OSM fetches, opening hours and lighting/activity proxies
 hazards/                      Report validation, persistence and review
 ui/web/                       Integrated standalone frontend
   js/map3d.js                 Display adapter for the Plan page; no routing calculations
@@ -236,6 +250,7 @@ Open **http://127.0.0.1:8502**.
 - Internet access is required for address lookup, walking-route requests, and the 2D basemaps. The 3D Bengaluru city assets are served locally.
 - The 3D Plan map needs WebGL 2 and a browser supporting `DecompressionStream`; the existing 2D map is used if 3D cannot load. Drag to pan, right-drag to tilt or rotate, and use the zoom, fit, or north controls.
 - Allow browser location access to use GPS features. Map selection and coordinate entry remain available without it.
+- Environmental context is enabled by default. `SAFENISHA_OVERPASS_URL` can select another compatible Overpass endpoint. For an isolated synthetic-baseline regression run, set `SAFENISHA_CONTEXT_ENABLED=0` before starting the server.
 - Choose another port if needed: `python web_app.py --port 8504`.
 
 The earlier Streamlit interface can be run separately with:
@@ -268,13 +283,14 @@ Then, in a second terminal:
 python tests/web_integration_check.py
 python tests/exact_route_browser_check.py
 python tests/profile_browser_check.py
+python tests/environment_browser_check.py
 ```
 
 ## Suggested judge walkthrough
 
 1. **Plan a walk.** Search two places, or focus each endpoint field and select it on the map. Routes appear automatically.
 2. **Compare the trade-off.** Move safety preference from zero toward five. Inspect the route cards, local road colours, and number of candidates compared.
-3. **Open Risk Atlas.** Compare the same paths against the synthetic hotspots. Explain that the map and scorer use one shared numeric field.
+3. **Inspect the evidence.** Check estimated-open places, unknown hours, mapped lighting coverage and fetch/evaluation times beneath the route cards. Open Risk Atlas to compare the paths against the synthetic baseline hotspots.
 4. **Report a problem.** Click the warning icon, pick a point on the route, and submit a hazard. Show the pin and saved reports before submission, then the updated route afterward.
 5. **Demonstrate live rerouting.** Start a journey with GPS permission. The separate reroute action uses the current fix, rather than a previous route origin.
 6. **Show responsive design.** Switch theme and resize to a mobile viewport.

@@ -850,6 +850,9 @@ body.hidden-tab * { animation-play-state: paused !important; }
 /* ---------------- 3D plan map (js/map3d.js drives map3d/engine.js) ---------------- */
 /* The 3D scene is always night-time, so it keeps its own palette in both themes. */
 .map3d { background: #0A0F1F; }
+.context-card { grid-column: 1 / -1; padding: 16px 20px; }
+.context-card[hidden] { display: none; }
+.context-card p { margin: 6px 0 0; }
 .map3d::after { box-shadow: inset 0 0 50px -20px rgba(3, 5, 12, .6); }
 .map3d:has(.map3d-view:focus-visible) { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent), var(--shadow); }
 .map3d-stage {

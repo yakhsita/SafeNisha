@@ -11,6 +11,7 @@ from core.hazard_detour import find_hazard_detour, _clear_of, _hazard_polygons, 
 from core.route_scoring import score_route_alternatives, choose_route_pair, _point_to_segment_meters
 from core.synthetic_routing import zone_profiles, build_demo_zones, risk_field_definition
 from core.risk_alternatives import find_risk_alternatives, unique_routes
+from core.environment import EnvironmentField
 from hazards import hazard_service
 
 
@@ -99,8 +100,9 @@ def mark_departure_turn(route, heading, origin):
 
 
 class JourneyService:
-    def __init__(self, database_path=None):
+    def __init__(self, database_path=None, environment_provider=None):
         self.database_path = database_path
+        self.environment_provider = environment_provider
         self.cache = {}
         self.detours = {}
         self.risk_candidates = {}
@@ -155,6 +157,10 @@ class JourneyService:
         profiles = _profiles(DATA_PATH.read_text(encoding="utf-8-sig"))
         zones = build_demo_zones(profiles, routes)
         layers = {"synthetic_zones": zones}
+        environment = self.environment_provider.get(routes) if self.environment_provider else {"status":"disabled"}
+        if environment["status"] == "available":
+            layers["environment"] = EnvironmentField(environment)
+            environment = layers["environment"].metadata()
         # Explore hotspot bypasses even when the default router returns one path.
         # Keep the field anchored to the original query while ranking every path.
         if beta>0:
@@ -247,10 +253,11 @@ class JourneyService:
                 segments.append(weighted/(upper-lower) if upper>lower else route["risk_indicator"])
             steps = [step for leg in route.get("legs",[]) for step in leg.get("steps",[])]
             return {"distance_m":route["distance"],"risk_indicator":route["risk_indicator"],
-                    "risk_factors":route["risk_factors"], "risk_source":"synthetic",
+                    "risk_factors":route["risk_factors"], "risk_source":route["risk_source"],
+                    "environment":route.get("environment"),
                     "path":[[lat,lon] for lon,lat in points],"segment_risk":segments,"risk_paths":risk_paths,
                     "detour":route.get("detour"),"steps":steps}
-        return {"live":True,"shortest":package(shortest),"lower_risk":package(preferred),
+        return {"live":True,"shortest":package(shortest),"lower_risk":package(preferred),"environment":environment,
                 "start":{"lat":start[0],"lon":start[1]},"end":{"lat":end[0],"lon":end[1]},
                 "synthetic_zones":zones,"risk_field":risk_field_definition(),"hazard_blocked":blocked,"candidate_count":len(routes),"origin_mode":"current" if active and force else "planned",
                 "avoided_report_ids":[r["id"] for r in hazards if r.get("id")] }

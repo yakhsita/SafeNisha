@@ -95,7 +95,7 @@
       const low = k === 'low', seg = R[k].seg;
       const strip = seg
         ? `<div class="seg" role="img" aria-label="Estimated risk along the route, start to end">${'<i class="seg-bar"></i>'.repeat(seg.length)}</div>
-           <div class="seg-axis"><span>Start</span><span>Risk along route · synthetic</span><span>End</span></div>`
+           <div class="seg-axis"><span>Start</span><span>Risk along route · ${this.sc.routes?.[low?'lower_risk':'shortest']?.risk_source==='hybrid'?'mixed sources':'synthetic'}</span><span>End</span></div>`
         : '<div class="seg-none">Segment risk: data limited</div>';
       return `<article class="route-card ${k}" data-k="${k}" role="button" tabindex="0" aria-pressed="false">
         <div class="rc-head">
@@ -196,7 +196,25 @@
     onSelect:k=>selectPlan(k),onPick:(lat,lon)=>pickPlanPoint(lat,lon)});
   planMap.scene=plan;maps.push(planMap);
   const planPanel=new RoutePanel($('#plan-panel'),plan,{onSelect:k=>selectPlan(k)});
-  function selectPlan(k){plan.sel=k;planMap.draw();planPanel.sync();}
+  let contextTimer=0;
+  function renderEnvironment(result){
+    const box=$('#route-context'),meta=result.environment;
+    if(!meta||meta.status==='disabled'){box.hidden=true;return;}
+    box.hidden=false;
+    const evidence=result[plan.sel==='short'?'shortest':'lower_risk'].environment;
+    let detail;
+    if(meta.status==='pending')detail='Checking nearby place schedules and mapped lighting. Your route is available while this loads.';
+    else if(meta.status!=='available')detail='Nearby map data is unavailable. Synthetic estimates are being used; missing data does not mean a street is empty or unlit.';
+    else{
+      const checked=new Date(meta.evaluated_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      const fetched=new Date(meta.fetched_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      detail=`${evidence?.open_places||0} estimated open · ${evidence?.closed_places||0} scheduled closed · ${evidence?.unknown_hours||0} hours unknown within 150 m of this route. `+
+        `Mapped lighting covers ${Math.round((evidence?.lighting_coverage||0)*100)}% of the route. Map fetched ${fetched}; hours checked ${checked}.`;
+    }
+    box.innerHTML='<b>Nearby activity &amp; mapped lighting</b><p>'+esc(detail)+'</p>'+
+      '<p class="fine">Opening hours estimate activity, not live crowds. Lighting records show mapped infrastructure, not current lamp operation. Unknown sections retain synthetic estimates. Source: OpenStreetMap / Overpass.</p>';
+  }
+  function selectPlan(k){plan.sel=k;planMap.draw();planPanel.sync();if(plan.routes)renderEnvironment(plan.routes);}
   function parsePoint(value){
     const values=value.split(',').map(v=>Number(v.trim()));
     if(values.length!==2||!value.trim()||!value.split(',').every(v=>v.trim())||!values.every(Number.isFinite)||Math.abs(values[0])>90||Math.abs(values[1])>180)return null;
@@ -265,9 +283,9 @@
     if(!button.hidden)suggestionTimers[which]=setTimeout(()=>runSuggestions(which),600);
   }
   function scheduleRoute(){
-    ++fetchId;findBtn.disabled=false;clearTimeout(routeTimer);updateEndpoints();planMap.draw();
+    ++fetchId;findBtn.disabled=false;clearTimeout(routeTimer);clearTimeout(contextTimer);updateEndpoints();planMap.draw();
     if(plan.start&&plan.end)routeTimer=setTimeout(()=>findRoutes(),300);
-    else{plan.routes=null;plan.searched=false;plan.loading=false;planPanel.sync(true);}
+    else{plan.routes=null;plan.searched=false;plan.loading=false;planPanel.sync(true);$('#route-context').hidden=true;}
   }
   function headingAlongPath(point){
     const path=plan.routes?.lower_risk.path||[];
@@ -285,7 +303,7 @@
     updateEndpoints();
     if(!plan.start||!plan.end){if(srcEl.value&&dstEl.value)showError(searchErr,'Search each address or choose the locations on the map.');return;}
     const id=++fetchId;searchErr.hidden=true;findBtn.classList.remove('has-error');
-    plan.loading=true;planPanel.sync();findBtn.disabled=true;
+    if(!options.background){plan.loading=true;planPanel.sync();}findBtn.disabled=true;
     const force=!!options.force;
     const currentPoint=options.currentLocation||plan.currentLocation;
     const heading=journeyActive&&force?(travelHeading??headingAlongPath(currentPoint)):null;
@@ -298,8 +316,12 @@
       Object.assign(atlasMap.scene,{atlas:null,synthetic_zones:res.synthetic_zones,risk_field:res.risk_field,
         routes:res,searched:true,state:'normal',showRoutes:true,sel:plan.sel,
         start:res.start,end:res.end,currentLocation:plan.currentLocation});
-      atlasMap.fit();atlasMap.draw();
-      planMap.fit(true);planMap.draw();planPanel.sync(true);
+      if(!options.background){atlasMap.fit();planMap.fit(true);}
+      atlasMap.draw();planMap.draw();planPanel.sync(true);renderEnvironment(res);
+      clearTimeout(contextTimer);
+      if(res.environment?.status==='pending')contextTimer=setTimeout(()=>{
+        if(!hazardPick&&current!=='report'&&!plan.loading)findRoutes({background:true});
+      },5000);
       if(res.hazard_blocked)showError(searchErr,'No walking route avoiding these hazards was found.');
     }catch(error){if(id!==fetchId)return;plan.loading=false;planPanel.sync(true);showError(searchErr,error.message);findBtn.classList.add('has-error');}
     finally{if(id===fetchId)findBtn.disabled=false;}
@@ -884,4 +906,9 @@
   data.refreshHazards().then(()=>{renderReports(false);redrawHazards();})
     .catch(error=>toast(error.message,'bad'));
   requestLocation(false);
+  setInterval(()=>{
+    if(!document.hidden&&['plan','atlas'].includes(current)&&plan.routes&&!plan.loading&&!hazardPick&&!findBtn.disabled){
+      findRoutes({background:true});
+    }
+  },60000);
 })();

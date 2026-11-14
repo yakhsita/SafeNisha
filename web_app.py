@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from core.journey_service import JourneyService
 from core.geocoding import AddressSearch, GeocodingServiceError
 from core.accounts import Accounts, AccountError, SESSION_SECONDS
+from core.environment import EnvironmentProvider
 
 ADDRESS_SEARCH = AddressSearch()
 from core.osm_router import RoutingServiceError
@@ -119,7 +120,7 @@ def main():
     parser.add_argument("--database",default=None)
     args=parser.parse_args()
     database.initialize_database(args.database)
-    server=ThreadingHTTPServer(("127.0.0.1",args.port),partial(Handler,service=JourneyService(args.database),accounts=Accounts(args.database)))
+    server=ThreadingHTTPServer(("127.0.0.1",args.port),partial(Handler,service=JourneyService(args.database,environment_provider=EnvironmentProvider()),accounts=Accounts(args.database)))
     print("SafeNisha integrated frontend: http://127.0.0.1:{}".format(args.port),flush=True)
     try:
         server.serve_forever()

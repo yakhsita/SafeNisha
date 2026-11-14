@@ -99,7 +99,7 @@
         </div>
         <button class="btn primary" id="journey-toggle" type="button">Start journey</button>
         <button class="btn ghost find" id="find" type="submit"><span class="spinner" aria-hidden="true"></span><span class="find-label">Refresh route</span></button>
-        <p class="fine synthetic-label">Dataset-based simulated risk</p>
+        <p class="fine synthetic-label">Synthetic incident model + available nearby activity and lighting estimates</p>
         <p class="form-error" id="search-error" role="alert" hidden></p>
       </form>
       <div class="map-slot plan-map-slot">
@@ -111,6 +111,7 @@
         </div>
       </div>
       <aside class="panel" id="plan-panel" aria-live="polite" aria-label="Route comparison"></aside>
+      <div id="route-context" class="card context-card" aria-live="polite" hidden></div>
     </div>
   </section>
 
@@ -164,7 +165,7 @@
     </div>
     <div class="note warn">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 2.8 19.5h18.4L12 3.5z"/><path d="M12 10v4.2M12 17h.01"/></svg>
-      <div><b>Synthetic demonstration.</b> Redder hotspots indicate higher modelled synthetic risk. Faint or clear areas indicate lower values. They are not incident data and say nothing about real streets.</div>
+      <div><b>Synthetic baseline.</b> Hotspots show synthetic model values, not verified street danger. Route colours can also include available place-schedule and mapped-lighting estimates.</div>
     </div>
     <div class="card atlas-bar">
       <div>

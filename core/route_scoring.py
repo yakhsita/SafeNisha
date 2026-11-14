@@ -111,8 +111,14 @@ def score_route_alternatives(routes, layers, confirmed_hazards, beta, weights=No
             factors.update(synthetic_factors)
             # Synthetic placement provides no verified real-world confidence.
             factors["uncertainty"] = 1.0
+        context = None
+        if layers.get("environment") is not None:
+            updates, context = layers["environment"].route_factors(route, factors, synthetic_zones)
+            factors.update(updates)
         result = dict(route)
-        result["risk_source"] = "synthetic" if synthetic_zones else "observations"
+        result["risk_source"] = "hybrid" if context and context["applied"] else "synthetic" if synthetic_zones else "observations"
+        if context is not None:
+            result["environment"] = context
         if synthetic_zones:
             result["synthetic_coverage"] = coverage
         result["risk_factors"] = factors
