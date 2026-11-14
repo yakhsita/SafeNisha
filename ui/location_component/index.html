@@ -12,6 +12,7 @@
   <script>
     (function () {
       var watchId = null;
+      var lastRequest = null;
       var lastSentAt = 0;
       var lastPosition = null;
       var status = document.getElementById("status");
@@ -76,7 +77,23 @@
       window.addEventListener("message", function (event) {
         if (event.source !== window.parent || event.origin !== window.location.origin) return;
         if (!event.data || event.data.type !== "streamlit:render") return;
-        if (event.data.args && event.data.args.active) startTracking();
+        var args = event.data.args || {};
+        if (args.once) {
+          if (lastRequest === args.request_id) return;
+          lastRequest = args.request_id;
+          var requestId = args.request_id;
+          status.textContent = "Finding your current location...";
+          navigator.geolocation.getCurrentPosition(function (position) {
+            status.textContent = "Map centered on your current location.";
+            sendValue({latitude: position.coords.latitude,
+                       longitude: position.coords.longitude,
+                       accuracy: position.coords.accuracy,
+                       request_id: requestId});
+          }, function (error) {
+            status.textContent = "Location unavailable: " + error.message;
+            sendValue({error: error.message, request_id: requestId});
+          }, {enableHighAccuracy: true, maximumAge: 60000, timeout: 15000});
+        } else if (args.active) startTracking();
         else stopTracking();
       });
 

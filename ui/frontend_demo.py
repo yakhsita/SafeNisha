@@ -1,7 +1,7 @@
 """Streamlit interface for OSM walking routes and map-based hazard reports."""
 
-import csv
 import html
+import hashlib
 import math
 from datetime import datetime, timezone
 
@@ -9,12 +9,20 @@ import folium
 import streamlit as st
 from streamlit_folium import st_folium
 
+from core.hazard_detour import find_hazard_detour
 from core.osm_router import get_route_alternatives
 from core.risk_engine import DEFAULT_WEIGHTS
-from core.route_scoring import choose_route_pair, score_route_alternatives
-from data.risk_layers import load_risk_layers
+from core.synthetic_routing import zone_profiles, build_demo_zones
+from core.incident_model import DATA_PATH
+import json
+from core.route_scoring import (
+    CORRIDOR_METERS,
+    _distance_to_route_meters,
+    choose_route_pair,
+    score_route_alternatives,
+)
 from hazards import database, hazard_service
-from ui.browser_location import track_location
+from ui.browser_location import track_location, watch_endpoint_focus
 from ui.styles import APP_CSS
 
 
@@ -27,6 +35,11 @@ HAZARD_LABELS = {
 }
 STATUS_COLORS = {"new": "orange", "confirmed": "green", "resolved": "gray"}
 ROUTE_COLORS = {"shortest": "#2878d0", "preferred": "#18a558"}
+
+
+@st.cache_data(show_spinner=False)
+def _synthetic_profiles(contents):
+    return zone_profiles(json.loads(contents))
 
 
 def _normalized_weights():
@@ -108,10 +121,12 @@ def _apply_pending_map_selection():
     selection = st.session_state.pop("pending_map_selection", None)
     if selection is None:
         return
+    st.session_state["map_focus_location"] = False
     action, latitude, longitude = selection
     if action == "Starting point":
         st.session_state["start_location"] = "{:.6f}, {:.6f}".format(latitude, longitude)
         _invalidate_routes()
+        st.session_state["map_action"] = "Destination"
     elif action == "Destination":
         st.session_state["destination_location"] = "{:.6f}, {:.6f}".format(
             latitude, longitude
@@ -125,15 +140,103 @@ def _apply_pending_map_selection():
         st.session_state["hazard_drawer_open"] = True
 
 
+def _hazard_detour(route_query, base_route, hazards, destination):
+    """Detour around the first hazard on ``base_route``, cached per query and hazards."""
+    key = (
+        "direct-detour-v2",
+        route_query,
+        round(base_route["distance"], 1),
+        tuple(sorted(
+            (round(hazard["latitude"], 6), round(hazard["longitude"], 6))
+            for hazard in hazards
+        )),
+    )
+    cache = st.session_state.setdefault("hazard_detour_cache", {})
+    if cache.get(key) is None:
+        with st.spinner("Rerouting around the hazard…"):
+            cache[key] = find_hazard_detour(base_route, hazards, destination)
+    return cache[key]
+
+
+def _apply_endpoint_focus(payload):
+    if not isinstance(payload, dict) or payload.get("endpoint") not in ("Starting point", "Destination"):
+        return
+    if payload.get("event_id") == st.session_state.get("endpoint_focus_event"):
+        return
+    st.session_state["endpoint_focus_event"] = payload["event_id"]
+    st.session_state["map_action"] = payload["endpoint"]
+    st.session_state["hazard_select_mode"] = False
+
+
+def _new_map_click(map_data):
+    """Return the changed click event, ignoring stale map/layer click values."""
+    if not map_data:
+        return None
+    previous = st.session_state.get("map_click_events", {})
+    current = {name: map_data.get(name) for name in ("last_clicked", "last_object_clicked")}
+    st.session_state["map_click_events"] = current
+    for name in ("last_clicked", "last_object_clicked"):
+        if current[name] and current[name] != previous.get(name):
+            return current[name]
+    return None
+
+
+def _request_map_location(use_as_start=False):
+    st.session_state["map_location_request"] = st.session_state.get("map_location_request", 0) + 1
+    st.session_state["map_focus_location"] = True
+    st.session_state["map_location_pending"] = True
+    st.session_state["map_location_as_start"] = use_as_start
+
+
+def _apply_map_location(payload):
+    if not isinstance(payload, dict) or not st.session_state.get("map_location_pending"):
+        return
+    if payload.get("request_id") != st.session_state.get("map_location_request", 0):
+        return
+    st.session_state["map_location_pending"] = False
+    if payload.get("error"):
+        st.session_state["map_location_error"] = payload["error"]
+        return
+    try:
+        point = _parse_coordinates("{}, {}".format(payload["latitude"], payload["longitude"]),
+                                   "Current location")
+    except (KeyError, ValueError):
+        return
+    st.session_state["map_current_location"] = point
+    st.session_state["map_location_error"] = None
+    st.session_state["map_location_revision"] = st.session_state.get("map_location_revision", 0) + 1
+    if st.session_state.pop("map_location_as_start", False):
+        st.session_state["start_location"] = "{:.6f}, {:.6f}".format(*point)
+        st.session_state["map_action"] = "Destination"
+        _invalidate_routes()
+
+
 def _make_route_map(
-    reports, selected_location, shortest, preferred, start, destination, journey_active=False
+    reports, selected_location, shortest, preferred, start, destination, journey_active=False, synthetic_zones=None
 ):
     map_view = folium.Map(
-        location=MAP_CENTER,
+        location=st.session_state.get("map_current_location", MAP_CENTER),
         zoom_start=15,
         control_scale=True,
         tiles="OpenStreetMap",
     )
+
+    for zone in synthetic_zones or []:
+        west, south, east, north = zone["bounds"]
+        level = (zone["historical_incidents"] + zone["lighting_deficiency"] + zone["isolation"]) / 3
+        color = "#ef4444" if level > 0.6 else "#f59e0b" if level > 0.4 else "#22c55e"
+        folium.Rectangle(
+            bounds=[(south, west), (north, east)], color=color, weight=1,
+            fill=True, fill_opacity=0.10,
+            tooltip="Synthetic demo {} | incident {:.2f} | lighting deficiency {:.2f} | isolation {:.2f}".format(
+                zone["area_id"], zone["historical_incidents"], zone["lighting_deficiency"], zone["isolation"]),
+            interactive=False,
+        ).add_to(map_view)
+    current_position = st.session_state.get("map_current_location")
+    if current_position:
+        folium.CircleMarker(current_position, radius=9, color="white", weight=3,
+                            fill=True, fill_color="#2563eb", fill_opacity=1,
+                            tooltip="Your current location").add_to(map_view)
 
     if shortest is not None:
         shortest_coordinates = [
@@ -187,6 +290,34 @@ def _make_route_map(
             popup=folium.Popup(popup, max_width=280),
         ).add_to(map_view)
 
+    if preferred is not None and preferred.get("detour"):
+        folium.CircleMarker(
+            location=preferred["detour"]["divergence"],
+            radius=8,
+            color=ROUTE_COLORS["preferred"],
+            fill=True,
+            fill_color="white",
+            fill_opacity=1.0,
+            weight=3,
+            tooltip="Take the hazard detour at this junction",
+        ).add_to(map_view)
+        return_geometry = preferred["detour"].get("return_geometry")
+        if return_geometry:
+            from folium.plugins import PolyLineTextPath
+            return_line = folium.PolyLine(
+                return_geometry, color="#f59e0b", weight=4, dash_array="7 6",
+                tooltip="U-turn: walk back to the junction",
+            ).add_to(map_view)
+            PolyLineTextPath(return_line, "\u279c", repeat=True, offset=5,
+                             attributes={"fill": "#f59e0b", "font-size": "18"}).add_to(map_view)
+        turnaround = preferred["detour"]["turnaround"]
+        if turnaround:
+            folium.Marker(
+                location=turnaround,
+                tooltip="Make a U-turn here and walk back to the junction",
+                icon=folium.Icon(color="red", icon="repeat", prefix="fa"),
+            ).add_to(map_view)
+
     if selected_location is not None:
         folium.Marker(
             location=(selected_location["latitude"], selected_location["longitude"]),
@@ -213,7 +344,10 @@ def _make_route_map(
     if selected_location is not None:
         hazard_point = (selected_location["latitude"], selected_location["longitude"])
         bounds.append(hazard_point)
-    if len(bounds) > 1:
+    if current_position and st.session_state.get("map_focus_location"):
+        map_view.location = current_position
+        map_view.zoom_start = 17
+    elif len(bounds) > 1:
         map_view.fit_bounds(bounds, padding=(28, 28))
     elif bounds:
         map_view.location = bounds[0]
@@ -427,7 +561,9 @@ def _route_instruction(step):
     action = maneuver.get("type", "continue").replace("_", " ")
     modifier = maneuver.get("modifier")
     street = step.get("name")
-    if action == "depart":
+    if modifier == "uturn":
+        instruction = "Make a U-turn"
+    elif action == "depart":
         instruction = "Start walking"
     elif action == "arrive":
         instruction = "Arrive at your destination"
@@ -528,33 +664,20 @@ def _render_hazard_drawer(reports):
                     st.rerun()
 
 
-def _render_route_cards(shortest, preferred, beta, candidate_count, hazard_preview):
+def _render_route_cards(
+    shortest, preferred, beta, candidate_count, hazard_preview, hazard_blocked=False
+):
     left, right = st.columns(2)
     with left:
         st.subheader("Original shortest route" if hazard_preview else "Shortest distance")
         st.metric("Walking distance", _format_meters(shortest["distance"]))
-        st.metric("Estimated risk indicator", "{:.2f}".format(shortest["risk_indicator"]))
+        st.metric("Synthetic risk indicator" if shortest.get("risk_source") == "synthetic" else "Estimated risk indicator", "{:.2f}".format(shortest["risk_indicator"]))
     with right:
         st.subheader("Safety-preferred")
         st.metric("Walking distance", _format_meters(preferred["distance"]))
-        st.metric("Estimated risk indicator", "{:.2f}".format(preferred["risk_indicator"]))
-    if shortest is preferred:
-        st.info("The shortest route is also preferred at this safety setting.")
-    if hazard_preview:
-        st.info(
-            "Hazard preview: the selected, unverified point is temporarily weighted for "
-            "the preferred-route comparison. The blue shortest route remains unchanged."
-        )
-        if candidate_count < 2:
-            st.warning(
-                "The public router returned only one route, so no distinct detour can be "
-                "shown until it provides another alternative."
-            )
-    st.caption(
-        "Safety preference β = {:.1f} · compared {} alternative{} returned by the public "
-        "walking router. The preferred route is selected only from those alternatives."
-        .format(beta, candidate_count, "" if candidate_count == 1 else "s")
-    )
+        st.metric("Synthetic risk indicator" if preferred.get("risk_source") == "synthetic" else "Estimated risk indicator", "{:.2f}".format(preferred["risk_indicator"]))
+    if hazard_blocked:
+        st.warning("No route avoiding this hazard is available.")
 
 
 def render_app():
@@ -565,9 +688,13 @@ def render_app():
     if isinstance(previous_click, tuple) and len(previous_click) == 3:
         st.session_state["last_map_click"] = previous_click[1:]
     _apply_pending_map_selection()
+    _apply_endpoint_focus(watch_endpoint_focus(
+        st.session_state["map_action"], st.session_state.get("hazard_select_mode", False)
+    ))
 
+    if st.session_state.get("app_page") == "Synthetic data":
+        st.session_state["app_page"] = "Plan journey"
     st.title("SafeNisha")
-    st.caption("Adaptive urban safety · Risk-aware walking route prototype")
     page = st.radio(
         "App page",
         options=["Plan journey", "Profile & Guardian"],
@@ -580,134 +707,88 @@ def render_app():
         _render_profile_page()
         return
 
+    st.session_state.setdefault("map_location_pending", True)
+    st.session_state.setdefault("map_location_request", 0)
+    map_location_payload = track_location(
+        active=False, once=st.session_state["map_location_pending"],
+        request_id=st.session_state["map_location_request"], key="map_location_lookup",
+    )
+    _apply_map_location(map_location_payload)
+    if st.session_state.get("map_location_error"):
+        st.warning("Location unavailable: {}. Allow location access in your browser, then retry."
+                   .format(st.session_state["map_location_error"]))
+
     st.markdown("### Plan a walking route")
-    st.caption(
-        "Enter `latitude, longitude` or select Starting point/Destination, then click "
-        "the map. Address search is not available in this prototype."
-    )
 
-    icon_col, start_col, swap_col = st.columns([0.06, 0.84, 0.10])
-    icon_col.markdown("### ○")
-    start_col.text_input(
-        "Starting point",
-        key="start_location",
-        placeholder="e.g. 12.9352, 77.6245",
-        on_change=_invalidate_routes,
-    )
-    swap_col.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
-    swap_col.button("↕", help="Swap start and destination", on_click=_swap_locations)
-
-    icon_col, destination_col, empty_col = st.columns([0.06, 0.84, 0.10])
-    icon_col.markdown("### ⚑")
-    destination_col.text_input(
-        "Destination",
-        key="destination_location",
-        placeholder="e.g. 12.9400, 77.6200",
-        on_change=_invalidate_routes,
-    )
-    empty_col.write("")
-    st.caption(
-        "Starting a journey requests browser location permission. Your current "
-        "coordinates are sent to the public walking router to calculate and refresh "
-        "routes; tracking stops when the journey stops or this page is closed."
-    )
-
-    if st.session_state.get("journey_active"):
-        journey_button_col, journey_status_col = st.columns([0.25, 0.75])
-        if journey_button_col.button("Stop journey", key="stop_journey"):
-            st.session_state["journey_active"] = False
-            st.session_state["journey_location"] = None
-            st.session_state["journey_route_origin"] = None
-            st.session_state["journey_route_origin_at"] = 0
-            _invalidate_routes()
-            st.rerun()
-        if st.session_state.get("journey_location"):
-            journey_status_col.info(
-                "Journey active · GPS updates while this page is open."
-            )
-        elif st.session_state.get("journey_location_error"):
-            journey_status_col.warning(
-                "Journey started but waiting for location permission; retry by stopping "
-                "and starting again."
-            )
-        else:
-            journey_status_col.info(
-                "Journey active · waiting for location permission."
-            )
-    elif st.button(
-        "Start journey",
-        type="primary",
-        help="Requests your current location and starts a walking route to the destination.",
-    ):
-        try:
-            _parse_coordinates(
-                st.session_state.get("destination_location", ""), "Destination"
-            )
-        except ValueError as error:
-            st.error(str(error))
-        else:
-            st.session_state["journey_active"] = True
-            st.session_state["journey_location"] = None
-            st.session_state["journey_location_error"] = None
-            st.session_state["journey_route_origin"] = None
-            st.session_state["journey_route_origin_at"] = 0
-            _invalidate_routes()
-            st.rerun()
-
-    preference_col, hazard_col = st.columns([0.8, 0.2])
-    with preference_col:
+    hazard_select_mode = st.session_state.get("hazard_select_mode", False)
+    map_controls, map_column = st.columns([0.29, 0.71])
+    with map_controls:
+        st.text_input("Starting point", key="start_location",
+                      placeholder="Click here, then choose on map",
+                      on_change=_invalidate_routes)
+        location_action, swap_action = st.columns([0.72, 0.28], gap="small")
+        location_action.button("Use my current location", key="use_current_location_start",
+                               on_click=_request_map_location, args=(True,))
+        swap_action.button("", icon=":material/swap_vert:",
+                           help="Swap start and destination", on_click=_swap_locations,
+                           key="swap_endpoints")
+        st.text_input("Destination", key="destination_location",
+                      placeholder="Click here, then choose on map",
+                      on_change=_invalidate_routes)
+        active_field = "start_location" if st.session_state["map_action"] == "Starting point" else "destination_location"
+        if not hazard_select_mode:
+            st.markdown("<style>.st-key-" + active_field +
+                        " input {outline: 2px solid #60a5fa; outline-offset: 1px;}</style>",
+                        unsafe_allow_html=True)
         st.markdown("Safety preference")
-        st.caption("Low  ← less influence from estimated risk")
-        beta = st.slider(
-            "Safety preference",
-            min_value=0.0,
-            max_value=5.0,
-            value=2.0,
-            step=0.1,
-            label_visibility="collapsed",
-            help="Controls how strongly the full estimated-risk indicator influences route choice.",
-        )
-        st.caption("More influence from estimated risk →  High")
-    with hazard_col:
-        st.markdown("<div style='height: 26px'></div>", unsafe_allow_html=True)
-        st.button(
-            "⚠ Report hazard",
-            on_click=_open_hazard_drawer,
-            help="Choose a map location and report a street hazard.",
-            use_container_width=True,
-        )
+        beta = st.slider("Safety preference", min_value=0.0, max_value=5.0,
+                         value=2.0, step=0.1, label_visibility="collapsed")
+        st.caption("Simulated risk - illustrative zones")
+        if st.session_state.get("journey_active"):
+            journey_button_col, journey_status_col = st.columns([0.25, 0.75])
+            if journey_button_col.button("Stop journey", key="stop_journey"):
+                st.session_state["journey_active"] = False
+                st.session_state["journey_location"] = None
+                st.session_state["journey_route_origin"] = None
+                st.session_state["journey_route_origin_at"] = 0
+                _invalidate_routes()
+                st.rerun()
+            if st.session_state.get("journey_location"):
+                journey_status_col.info(
+                    "Journey active · GPS updates while this page is open."
+                )
+            elif st.session_state.get("journey_location_error"):
+                journey_status_col.warning(
+                    "Journey started but waiting for location permission; retry by stopping "
+                    "and starting again."
+                )
+            else:
+                journey_status_col.info(
+                    "Journey active · waiting for location permission."
+                )
+        elif st.button(
+            "Start journey",
+            type="primary",
+            help="Requests your current location and starts a walking route to the destination.",
+        ):
+            try:
+                _parse_coordinates(
+                    st.session_state.get("destination_location", ""), "Destination"
+                )
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.session_state["journey_active"] = True
+                st.session_state["journey_location"] = None
+                st.session_state["journey_location_error"] = None
+                st.session_state["journey_route_origin"] = None
+                st.session_state["journey_route_origin_at"] = 0
+                _invalidate_routes()
+                st.rerun()
 
-    st.caption(
-        "OpenStreetMap © contributors. Map selections are clicked coordinates, not "
-        "road-snapped points; the router may snap route endpoints to its walking network."
-    )
 
     weights = _normalized_weights()
-    st.sidebar.header("Prototype settings")
-    st.sidebar.caption(
-        "Risk factors: " + " · ".join(
-            "{} {:.0f}%".format(key.replace("_", " "), value * 100)
-            for key, value in weights.items()
-        )
-    )
-
-    try:
-        layers = load_risk_layers()
-    except (OSError, ValueError, csv.Error) as error:
-        layers = {"historical_incidents": [], "lighting": [], "isolation": []}
-        st.error("Could not load a risk-data CSV: {}".format(error))
-    missing_layer_names = [
-        name.replace("_", " ")
-        for name, rows in layers.items()
-        if not rows
-    ]
-    if missing_layer_names:
-        st.warning(
-            "Data limited: no usable records for {}. Uncertainty is increased; "
-            "risk indicators are not probabilities of harm."
-            .format(", ".join(missing_layer_names))
-        )
-
+    layers = {}
     reports = hazard_service.get_reports()
     confirmed_hazards = hazard_service.get_confirmed_reports()
     journey_active = st.session_state.get("journey_active", False)
@@ -724,33 +805,19 @@ def render_app():
                 "restart the journey to retry."
                 .format(st.session_state["journey_location_error"])
             )
-        current_location = st.session_state.get("journey_location")
-        if current_location:
-            accuracy = current_location.get("accuracy")
-            st.caption(
-                "Current location: {:.6f}, {:.6f}{}".format(
-                    current_location["latitude"],
-                    current_location["longitude"],
-                    " · accuracy ±{:.0f} m".format(accuracy)
-                    if isinstance(accuracy, (int, float)) else "",
-                )
-            )
-        else:
-            st.info("Waiting for browser location permission and the first GPS reading…")
 
     current_start = None
     current_destination = None
+    try:
+        current_start = _parse_coordinates(
+            st.session_state.get("start_location", ""), "Starting point"
+        )
+    except ValueError:
+        pass
     if journey_active:
         current_location = st.session_state.get("journey_location")
         if current_location:
             current_start = (current_location["latitude"], current_location["longitude"])
-    else:
-        try:
-            current_start = _parse_coordinates(
-                st.session_state.get("start_location", ""), "Starting point"
-            )
-        except ValueError:
-            pass
     try:
         current_destination = _parse_coordinates(
             st.session_state.get("destination_location", ""), "Destination"
@@ -759,7 +826,7 @@ def render_app():
         pass
 
     route_origin = (
-        st.session_state.get("journey_route_origin")
+        (st.session_state.get("journey_route_origin") or current_start)
         if journey_active else current_start
     )
     route_query = (
@@ -785,8 +852,18 @@ def render_app():
             st.session_state["route_error"] = str(error)
             route_error = str(error)
 
+    synthetic_zones = []
+    if route_options:
+        try:
+            profiles = _synthetic_profiles(DATA_PATH.read_text(encoding="utf-8-sig"))
+            synthetic_zones = build_demo_zones(profiles, route_options)
+            layers = {"synthetic_zones": synthetic_zones}
+        except (OSError, ValueError, KeyError) as error:
+            st.error("Could not load synthetic routing data: {}".format(error))
     scored_routes = []
     shortest = preferred = None
+    hazard_blocked = False
+    hazard_note = None
     hazard_preview = st.session_state.get("hazard_location")
     if route_options:
         scoring_hazards = list(confirmed_hazards)
@@ -798,45 +875,94 @@ def render_app():
                     "preview": True,
                 }
             )
+        # The route the user saw before placing the hazard pin (confirmed hazards
+        # only). A new hazard adds a U-turn and a return leg before the detour.
+        scored_routes = score_route_alternatives(
+            route_options, layers, confirmed_hazards, beta, weights
+        )
+        shortest, base_route = choose_route_pair(scored_routes)
+        base_route = route_options[scored_routes.index(base_route)]
         scored_routes = score_route_alternatives(
             route_options, layers, scoring_hazards, beta, weights
         )
-        shortest, preferred = choose_route_pair(scored_routes)
-
-    hazard_select_mode = st.session_state.get("hazard_select_mode", False)
-    map_controls, map_column = st.columns([0.22, 0.78])
-    with map_controls:
-        st.markdown("#### Map click selects")
-        st.radio(
-            "Choose a route endpoint",
-            options=["Starting point", "Destination"],
-            key="map_action",
-            disabled=hazard_select_mode,
-            label_visibility="collapsed",
+        preferred = next(
+            route for route, original in zip(scored_routes, route_options)
+            if original is base_route
         )
-        if hazard_select_mode:
-            st.info("Hazard mode: click the map to place the red hazard pin.")
-        else:
-            st.caption("Select which endpoint to place on the map.")
-    with map_column:
+        shortest = min(scored_routes, key=lambda route: route["distance"])
+        if hazard_preview is not None:
+            pin_distance = _distance_to_route_meters(
+                hazard_preview["latitude"], hazard_preview["longitude"],
+                base_route["geometry"]["coordinates"],
+            )
+            if beta == 0:
+                hazard_note = (
+                    "Safety preference is 0, so hazards are not avoided. Raise it above "
+                    "0 to reroute around the pin."
+                )
+            elif pin_distance > CORRIDOR_METERS:
+                hazard_note = (
+                    "The hazard pin is {} from the green route, so the route is not "
+                    "changed. Click on the green route itself (within {:.0f} m) to "
+                    "reroute around it.".format(
+                        _format_meters(pin_distance), CORRIDOR_METERS
+                    )
+                )
+        if beta > 0 and scoring_hazards and preferred["risk_factors"]["live_hazards"] > 0:
+            detour = _hazard_detour(
+                route_query, base_route, scoring_hazards, current_destination
+            )
+            if detour is not None:
+                scored_routes = score_route_alternatives(
+                    list(route_options) + [detour], layers, scoring_hazards, beta, weights
+                )
+                shortest = min(scored_routes[:-1], key=lambda route: route["distance"])
+                # Follow the approach, U-turn, return leg, and clear detour.
+                preferred = scored_routes[-1]
+            else:
+                clear_routes = [
+                    route for route in scored_routes
+                    if route["risk_factors"]["live_hazards"] == 0
+                ]
+                if clear_routes:
+                    preferred = min(
+                        clear_routes, key=lambda route: route["generalized_cost"]
+                    )
+                else:
+                    hazard_blocked = True
+
+    map_revision = repr((synthetic_zones, hazard_select_mode, hazard_preview, current_start, current_destination,
+                         preferred["geometry"] if preferred else None,
+                         st.session_state.get("map_location_revision", 0)))
+    map_key = "route_map_" + hashlib.sha256(map_revision.encode()).hexdigest()[:16]
+    if st.session_state.get("active_map_key") != map_key:
+        st.session_state["map_click_events"] = {}
+        st.session_state["active_map_key"] = map_key
+        st.session_state["last_map_click"] = None
+    with map_column, st.container(key="interactive_map"):
         map_data = st_folium(
             _make_route_map(
                 reports, hazard_preview, shortest, preferred,
-                current_start, current_destination, journey_active,
+                current_start, current_destination, journey_active, synthetic_zones=synthetic_zones,
             ),
             height=560,
             use_container_width=True,
-            returned_objects=["last_clicked"],
-            key="route_map",
+            returned_objects=["last_clicked", "last_object_clicked"],
+            key=map_key,
         )
-    clicked = map_data.get("last_clicked") if map_data else None
+        st.button(
+            ":material/my_location:", key="map_locate_button", on_click=_request_map_location,
+            help="Show my current location",
+        )
+        st.button(
+            "⚠", key="map_hazard_report", on_click=_open_hazard_drawer,
+            help="Report a hazard: click to choose its location on the map.",
+        )
+    clicked = _new_map_click(map_data)
     if clicked:
         latitude, longitude = float(clicked["lat"]), float(clicked["lng"])
         fingerprint = (round(latitude, 6), round(longitude, 6))
-        if not st.session_state.get("map_click_initialized"):
-            st.session_state["last_map_click"] = fingerprint
-            st.session_state["map_click_initialized"] = True
-        elif fingerprint != st.session_state.get("last_map_click"):
+        if fingerprint != st.session_state.get("last_map_click"):
             st.session_state["last_map_click"] = fingerprint
             st.session_state["pending_map_selection"] = (
                 "hazard" if hazard_select_mode
@@ -850,30 +976,23 @@ def render_app():
 
     if route_error:
         st.error(route_error)
+        st.button("Retry route", on_click=_invalidate_routes, key="retry_route")
+    if hazard_blocked:
+        st.button("Retry hazard detour", key="retry_hazard_detour",
+                  on_click=lambda: st.session_state.pop("hazard_detour_cache", None))
+    if hazard_note:
+        st.warning(hazard_note)
     if shortest is not None and preferred is not None:
         _render_route_cards(
-            shortest, preferred, beta, len(scored_routes), hazard_preview is not None
+            shortest, preferred, beta, len(route_options), hazard_preview is not None,
+            hazard_blocked,
         )
         if journey_active:
             _render_directions(preferred)
-        st.caption(
-            "Blue: shortest distance · Green: safety-preferred · Red: selected hazard "
-            "location. Estimated risk is a prototype indicator, not a safety guarantee."
-        )
-    elif not route_error:
-        if journey_active and current_start is None:
-            st.info("A GPS fix is needed before the journey route can be calculated.")
-        elif journey_active and route_options is None and route_error is None:
-            st.info("Waiting for your current location to calculate the journey route.")
-        else:
-            st.info("Choose both route endpoints to generate walking routes on the map.")
 
     if journey_active:
         if st.session_state.get("guardian_mode_enabled"):
-            st.info(
-                "Guardian Mode demo is enabled, but your location is not being shared "
-                "with anyone."
-            )
+            pass
             st.button(
                 "Preview guardian update",
                 on_click=lambda: st.session_state.__setitem__("show_guardian_demo", True),
@@ -907,8 +1026,3 @@ def render_app():
             )
 
     _render_hazard_drawer(reports)
-    st.caption(
-        "Location coordinates are sent to the public OSM-based walking router when "
-        "both endpoints are selected. The prototype has no address search or authenticated "
-        "moderation. Reports are stored locally; do not enter sensitive information."
-    )

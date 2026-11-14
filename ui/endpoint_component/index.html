@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><script>
+(function () {
+  let selected = null;
+  let hazardMode = false;
+  function send(value) {
+    window.parent.postMessage({isStreamlitMessage:true,
+      type:"streamlit:setComponentValue", value:value}, window.location.origin);
+  }
+  function select(event) {
+    const input = event.target.closest && event.target.closest('input[aria-label]');
+    if (!input) return;
+    const endpoint = input.getAttribute('aria-label');
+    if (endpoint !== 'Starting point' && endpoint !== 'Destination') return;
+    if (selected === endpoint && !hazardMode) return;
+    selected = endpoint;
+    hazardMode = false;
+    send({endpoint:endpoint, event_id:Date.now() + ':' + Math.random()});
+  }
+  window.parent.document.addEventListener('focusin', select);
+  window.parent.document.addEventListener('pointerdown', select);
+  window.addEventListener('message', function (event) {
+    if (event.source !== window.parent || event.origin !== window.location.origin) return;
+    if (!event.data || event.data.type !== 'streamlit:render') return;
+    selected = event.data.args.selected;
+    hazardMode = event.data.args.hazard_mode;
+  });
+  window.addEventListener('pagehide', function () {
+    window.parent.document.removeEventListener('focusin', select);
+    window.parent.document.removeEventListener('pointerdown', select);
+  });
+  window.parent.postMessage({isStreamlitMessage:true,
+    type:'streamlit:componentReady', apiVersion:1}, window.location.origin);
+  window.parent.postMessage({isStreamlitMessage:true,
+    type:'streamlit:setFrameHeight', height:0}, window.location.origin);
+})();
+</script></body></html>

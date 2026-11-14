@@ -103,7 +103,18 @@ def score_route_alternatives(routes, layers, confirmed_hazards, beta, weights=No
             ),
             "uncertainty": missing_layers / 3.0,
         }
+        synthetic_zones = layers.get("synthetic_zones", [])
+        coverage = None
+        if synthetic_zones:
+            from core.synthetic_routing import synthetic_route_factors
+            synthetic_factors, coverage = synthetic_route_factors(route, synthetic_zones)
+            factors.update(synthetic_factors)
+            # Synthetic placement provides no verified real-world confidence.
+            factors["uncertainty"] = 1.0
         result = dict(route)
+        result["risk_source"] = "synthetic" if synthetic_zones else "observations"
+        if synthetic_zones:
+            result["synthetic_coverage"] = coverage
         result["risk_factors"] = factors
         result["risk_indicator"] = calculate_risk(factors, weights)
         result["generalized_cost"] = route["distance"] * (

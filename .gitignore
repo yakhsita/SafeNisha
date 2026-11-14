@@ -5,3 +5,10 @@ venv/
 data/*.sqlite3
 data/*.db
 .streamlit/secrets.toml
+
+# Local reference checkouts; the integrated application lives in ui/web/.
+/3d-map/
+/ui_for_integration/
+
+# Generated browser-check screenshots.
+/tests/*.png

@@ -6,7 +6,7 @@ from data.risk_layers import load_risk_layers
 
 
 class RiskLayerTests(unittest.TestCase):
-    def test_loads_template_layers_without_fabricated_rows(self):
+    def test_missing_optional_csv_layers_are_empty(self):
         layers = load_risk_layers(Path(__file__).resolve().parents[1] / "data")
         self.assertEqual(layers, {
             "historical_incidents": [],
