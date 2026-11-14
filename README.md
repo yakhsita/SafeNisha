@@ -8,6 +8,44 @@ SafeNisha helps people compare the shortest available walking route with an alte
 
 **Project status:** Working local prototype. Routing uses real walking paths; the risk demonstration uses explicitly labelled synthetic data.
 
+**3D route planning** · **GPS-based rerouting** · **Community hazard reports** · **53 automated tests passing**
+
+[Product tour](#product-tour) · [How it works](#how-the-risk-calculation-works) · [Run the app](#run-the-application) · [Judge walkthrough](#suggested-judge-walkthrough)
+
+## Product tour
+
+### 1. See the trade-off before you walk
+
+Compare the shortest route with a route that gives estimated risk more influence, directly on a **3D Bengaluru city map**. Adjust the safety preference and inspect distance, walking time, and risk along the path. The same routing engine powers the 3D view and the route cards.
+
+![SafeNisha's 3D Plan route page showing a preferred walking route, a dotted shortest alternative, a reported hazard, and side-by-side distance and risk comparisons.](docs/images/plan-route-3d.png)
+
+*In this captured demonstration, the preferred route is 4,954 m with a synthetic risk indicator of 0.07; the shortest is 3,587 m with an indicator of 0.39. The user can see the extra walking distance and choose the trade-off. These indicators are model scores, not probabilities of harm.*
+
+### 2. Turn a reported problem into a routing decision
+
+Pick the hazard point on the planner, then report a broken streetlight, dark path, blocked footpath, or another infrastructure issue. **Submitting the report returns to the planner and requests an avoidance route.** During a journey, explicit rerouting starts from a fresh GPS location. Reports remain visible with their review status.
+
+![Report Hazard page with a pinned location, hazard categories, coordinates, a description field, and a recent report marked unverified.](docs/images/report-hazard.png)
+
+*New reports start as unverified. A report can guide avoidance for its submitter without being presented as a confirmed incident for everyone.*
+
+### 3. Understand the route in its neighbourhood
+
+The **Risk Atlas** overlays the preferred and shortest routes on a smooth kernel-density heatmap. Its hotspots and the route scorer use the same synthetic risk field, connecting the visual explanation to the routing decision. Redder areas show higher model values; faint areas show lower values.
+
+![Risk Atlas showing the preferred and shortest walking routes over smooth synthetic risk hotspots, with start, destination, and hazard markers.](docs/images/risk-atlas.png)
+
+*The heatmap appears only in Risk Atlas. Its illustrative hotspots do not establish the actual safety of the streets shown.*
+
+### 4. Design for support throughout the journey
+
+**Guardian Mode previews our next step:** an opt-in, time-limited way for a trusted contact to follow a walk. The interface shows contact selection, a sharing duration, and clear controls for starting or stopping the session.
+
+![Guardian Mode design preview with a trusted-contact field, 15-, 30-, and 60-minute durations, and an inactive sharing timer.](docs/images/guardian-preview.png)
+
+*Guardian Mode is currently a browser-local design preview. It does not share location or notify a contact.*
+
 ---
 
 ## The problem
